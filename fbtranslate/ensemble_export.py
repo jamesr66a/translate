@@ -13,11 +13,11 @@ import torch.onnx.operators
 from fairseq import utils
 from fbtranslate import dictionary, rnn  # noqa
 
-from caffe2.caffe2.fb.predictor import predictor_exporter
+# from caffe2.caffe2.fb.predictor import predictor_exporter
 from caffe2.python import core, dyndep, workspace
 from caffe2.python.onnx import backend as caffe2_backend
 
-dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/aten:aten_op")
+# dyndep.InitOpsLibrary("@/caffe2/caffe2/contrib/aten:aten_op")
 
 logger = logging.getLogger(__name__)
 
@@ -170,24 +170,24 @@ def save_caffe2_rep_to_db(
     for blob in output_names:
         output_shapes[blob] = (0,)
 
-    # Required because of https://github.com/pytorch/pytorch/pull/6456/files
-    with caffe2_backend_rep.workspace._ctx:
-        workspace.RunNetOnce(init_net)
-        predictor_export_meta = predictor_exporter.PredictorExportMeta(
-            predict_net=predict_net,
-            parameters=param_names,
-            inputs=input_names,
-            outputs=output_names,
-            shapes=output_shapes,
-            net_type='dag',
-            num_workers=num_workers,
-        )
-        predictor_exporter.save_to_db(
-            db_type='log_file_db',
-            db_destination=output_path,
-            predictor_export_meta=predictor_export_meta,
-        )
-    logger.info('Caffe2 predictor net saved as: {}'.format(output_path))
+    # # Required because of https://github.com/pytorch/pytorch/pull/6456/files
+    # with caffe2_backend_rep.workspace._ctx:
+    #     workspace.RunNetOnce(init_net)
+    #     predictor_export_meta = predictor_exporter.PredictorExportMeta(
+    #         predict_net=predict_net,
+    #         parameters=param_names,
+    #         inputs=input_names,
+    #         outputs=output_names,
+    #         shapes=output_shapes,
+    #         net_type='dag',
+    #         num_workers=num_workers,
+    #     )
+    #     predictor_exporter.save_to_db(
+    #         db_type='log_file_db',
+    #         db_destination=output_path,
+    #         predictor_export_meta=predictor_export_meta,
+    #     )
+    # logger.info('Caffe2 predictor net saved as: {}'.format(output_path))
 
 
 class EncoderEnsemble(nn.Module):
