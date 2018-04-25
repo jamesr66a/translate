@@ -343,3 +343,135 @@ class TestONNX(unittest.TestCase):
             'max_translation_candidates_per_word': 1,
         }
         self._test_batched_beam_decoder_step(test_args)
+
+    class BeamSearch(torch.jit.ScriptModule):
+        def __init__(self, model_list, src_tokens, src_lengths, beam_size=1,
+                     word_penalty=0, unk_penalty=0):
+            super().__init__()
+            self.model_list = model_list
+            self.real_encoder_ensemble = EncoderEnsemble(model_list)
+            input_tokens = torch.LongTensor(
+                np.array([model_list[0].dst_dict.eos()]),
+            )
+            prev_scores = torch.FloatTensor(np.array([0.0]))
+            timestep = torch.LongTensor(np.array([[0]]))
+            example_encoder_outs = self.real_encoder_ensemble(src_tokens,
+                                                              src_lengths)
+            self.encoder_ens = torch.jit.trace(src_tokens, src_lengths)(
+                self.real_encoder_ensemble
+            )
+            self.real_decoder_ensemble = \
+                DecoderBatchedStepEnsemble(model_list, beam_size, word_penalty,
+                                           unk_penalty)
+            self.decoder_ens = \
+                torch.jit.trace(
+                    input_tokens, prev_scores, timestep, *example_encoder_outs
+                )(
+                    self.real_decoder_ensemble
+                )
+
+        @torch.jit.script_method
+        def forward(self, src_tokens, src_lengths):
+            states = self.encoder_ens(src_tokens, src_lengths)
+            prev_token = 0
+            for i in range(20):
+                tokens, scores, prev_hypos_indices, attn_weights, *states = \
+                    self.decoder_ens(src_tokens.t(), prev_token, i, *states)
+
+    def _test_full_beam_decoder(self, test_args):
+        samples, src_dict, tgt_dict = test_utils.prepare_inputs(test_args)
+        sample = next(samples)
+        src_tokens = sample['net_input']['src_tokens'][0:1].t()
+        src_lengths = sample['net_input']['src_lengths'][0:1].int()
+
+        num_models = 3
+        model_list = []
+        for _ in range(num_models):
+            model_list.append(models.build_model(
+                test_args, src_dict, tgt_dict))
+
+        bs = TestONNX.BeamSearch(model_list, src_tokens, src_lengths)
+        print(bs.__getattr__('forward').graph)
+        import pdb; pdb.set_trace()
+        bs(src_tokens, src_lengths)
+        #
+        # pytorch_encoder_outputs = encoder_ensemble(src_tokens, src_lengths)
+        #
+        # decoder_step_ensemble = DecoderBatchedStepEnsemble(
+        #     model_list,
+        #     beam_size=beam_size,
+        # )
+        #
+        # tmp_dir = tempfile.mkdtemp()
+        # decoder_step_pb_path = os.path.join(tmp_dir, 'decoder_step.pb')
+        # decoder_step_ensemble.onnx_export(
+        #     decoder_step_pb_path,
+        #     pytorch_encoder_outputs,
+        # )
+        #
+        # # single EOS in flat array
+        # input_tokens = torch.LongTensor(
+        #     np.array([model_list[0].dst_dict.eos()]),
+        # )
+        # prev_scores = torch.FloatTensor(np.array([0.0]))
+        # timestep = torch.LongTensor(np.array([0]))
+        #
+        # pytorch_first_step_outputs = decoder_step_ensemble(
+        #     input_tokens,
+        #     prev_scores,
+        #     timestep,
+        #     *pytorch_encoder_outputs
+        # )
+        #
+        # # next step inputs (input_tokesn shape: [beam_size])
+        # next_input_tokens = torch.LongTensor(
+        #     np.array([i for i in range(4, 9)]),
+        # )
+        #
+        # next_prev_scores = pytorch_first_step_outputs[1]
+        # next_timestep = timestep + 1
+        # next_states = list(pytorch_first_step_outputs[4:])
+        #
+        # # Tile these for the next timestep
+        # for i in range(len(model_list)):
+        #     next_states[i] = next_states[i].repeat(1, beam_size, 1)
+        #
+        # pytorch_next_step_outputs = decoder_step_ensemble(
+        #     next_input_tokens,
+        #     next_prev_scores,
+        #     next_timestep,
+        #     *next_states
+        # )
+        #
+        # with open(decoder_step_pb_path, 'r+b') as f:
+        #     onnx_model = onnx.load(f)
+        # onnx_decoder = caffe2_backend.prepare(onnx_model)
+        #
+        # decoder_inputs_numpy = [
+        #     next_input_tokens.numpy(),
+        #     next_prev_scores.detach().numpy(),
+        #     next_timestep.detach().numpy(),
+        # ]
+        # for tensor in next_states:
+        #     decoder_inputs_numpy.append(tensor.detach().numpy())
+        #
+        # caffe2_next_step_outputs = onnx_decoder.run(
+        #     tuple(decoder_inputs_numpy),
+        # )
+        #
+        # for i in range(len(pytorch_next_step_outputs)):
+        #     caffe2_out_value = caffe2_next_step_outputs[i]
+        #     pytorch_out_value = pytorch_next_step_outputs[i].data.numpy()
+        #     np.testing.assert_allclose(
+        #         caffe2_out_value,
+        #         pytorch_out_value,
+        #         rtol=1e-4,
+        #         atol=1e-6,
+        #     )
+
+    def test_full_beam_decoder(self):
+        test_args = test_utils.ModelParamsDict(
+            encoder_bidirectional=True,
+            sequence_lstm=True,
+        )
+        self._test_full_beam_decoder(test_args)

@@ -170,6 +170,9 @@ def save_caffe2_rep_to_db(
     for blob in output_names:
         output_shapes[blob] = (0,)
 
+    # workspace.RunNetOnce(init_net)
+    # workspace.RunNet(predict_net)
+
     # # Required because of https://github.com/pytorch/pytorch/pull/6456/files
     # with caffe2_backend_rep.workspace._ctx:
     #     workspace.RunNetOnce(init_net)
