@@ -459,6 +459,14 @@ class DecoderStepEnsemble(nn.Module):
             'best_scores',
             'attention_weights_average',
         ]
+        for i in range(len(self.models)):
+            self.output_names.append('fixed_input_{}'.format(i))
+            outputs.append(inputs[i])
+
+        if possible_translation_tokens is not None:
+            self.output_names.append('possible_translation_tokens')
+            outputs.append(possible_translation_tokens)
+
         for i, state in enumerate(state_outputs):
             outputs.append(state)
             self.output_names.append('state_output_{}'.format(i))
@@ -738,6 +746,14 @@ class DecoderBatchedStepEnsemble(nn.Module):
             'prev_hypos_indices',
             'attention_weights_average',
         ]
+        for i in range(len(self.models)):
+            self.output_names.append('fixed_input_{}'.format(i))
+            outputs.append(inputs[i])
+
+        if possible_translation_tokens is not None:
+            self.output_names.append('possible_translation_tokens')
+            outputs.append(possible_translation_tokens)
+
         for i, state in enumerate(state_outputs):
             next_state = state.index_select(
                 dim=0,

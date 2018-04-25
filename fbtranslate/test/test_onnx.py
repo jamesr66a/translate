@@ -285,24 +285,17 @@ class TestONNX(unittest.TestCase):
 
         next_prev_scores = pytorch_first_step_outputs[1]
         next_timestep = timestep + 1
-        next_states = pytorch_first_step_outputs[4:]
+        next_states = list(pytorch_first_step_outputs[4:])
 
-        step_inputs = []
-
-        # encoder outputs need to be replicated for each input hypothesis
-        for encoder_rep in pytorch_encoder_outputs[:len(model_list)]:
-            step_inputs.append(encoder_rep.repeat(1, beam_size, 1))
-
-        if model_list[0].decoder.vocab_reduction_module is not None:
-            step_inputs.append(pytorch_encoder_outputs[len(model_list)])
-
-        step_inputs.extend(list(next_states))
+        # Tile these for the next timestep
+        for i in range(len(model_list)):
+            next_states[i] = next_states[i].repeat(1, beam_size, 1)
 
         pytorch_next_step_outputs = decoder_step_ensemble(
             next_input_tokens,
             next_prev_scores,
             next_timestep,
-            *step_inputs
+            *next_states
         )
 
         with open(decoder_step_pb_path, 'r+b') as f:
@@ -314,7 +307,7 @@ class TestONNX(unittest.TestCase):
             next_prev_scores.detach().numpy(),
             next_timestep.detach().numpy(),
         ]
-        for tensor in step_inputs:
+        for tensor in next_states:
             decoder_inputs_numpy.append(tensor.detach().numpy())
 
         caffe2_next_step_outputs = onnx_decoder.run(
