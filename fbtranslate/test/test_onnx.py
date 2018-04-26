@@ -425,6 +425,25 @@ class TestONNX(unittest.TestCase):
         for out in outs:
             print(out)
 
+        print(bs.__getattr__('forward').graph)
+
+        import io
+        f = io.BytesIO()
+        s = torch.onnx._export(
+            bs,
+            (src_tokens, src_lengths, prev_token, prev_scores, attn_weights,
+             prev_hypos_indices, torch.LongTensor([20])),
+            f, export_params=True, verbose=False, example_outputs=outs)
+
+        f.seek(0)
+        import onnx
+        onnx_model = onnx.load(f)
+        c2_model = caffe2_backend.prepare(onnx_model)
+        c2_model.run((src_tokens.numpy(), src_lengths.numpy(),
+                      prev_token.numpy(), prev_scores.numpy(),
+                      attn_weights.numpy(), prev_hypos_indices.numpy(),
+                      np.array([20])))
+
     def test_full_beam_decoder(self):
         test_args = test_utils.ModelParamsDict(
             encoder_bidirectional=True,
