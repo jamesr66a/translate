@@ -546,6 +546,7 @@ class DecoderBatchedStepEnsemble(nn.Module):
         beam_size,
         word_penalty=0,
         unk_penalty=0,
+        tile_internal=False,
     ):
         super().__init__()
         self.models = models
@@ -562,6 +563,8 @@ class DecoderBatchedStepEnsemble(nn.Module):
         self.word_rewards = torch.FloatTensor(vocab_size).fill_(word_penalty)
         self.word_rewards[dst_dict.eos()] = 0
         self.word_rewards[dst_dict.unk()] = word_penalty + unk_penalty
+
+        self.tile_internal = False
 
     def forward(self, input_tokens, prev_scores, timestep, *inputs):
         """
@@ -748,7 +751,10 @@ class DecoderBatchedStepEnsemble(nn.Module):
         ]
         for i in range(len(self.models)):
             self.output_names.append('fixed_input_{}'.format(i))
-            outputs.append(inputs[i])
+            if timestep == 0 and self.tile_internal:
+                outputs.append(inputs[i].repeat(1, self.beam_size, 1))
+            else:
+                outputs.append(inputs[i])
 
         if possible_translation_tokens is not None:
             self.output_names.append('possible_translation_tokens')

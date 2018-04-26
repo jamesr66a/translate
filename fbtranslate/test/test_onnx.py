@@ -343,3 +343,73 @@ class TestONNX(unittest.TestCase):
             'max_translation_candidates_per_word': 1,
         }
         self._test_batched_beam_decoder_step(test_args)
+
+    class BeamSearch(torch.jit.ScriptModule):
+        def __init__(self, model_list, src_tokens, src_lengths, beam_size=1,
+                     word_penalty=0, unk_penalty=0):
+            super().__init__()
+            self.model_list = model_list
+            encoder_ens = EncoderEnsemble(model_list)
+            example_encoder_outs = encoder_ens(src_tokens, src_lengths)
+            self.encoder_ens = torch.jit.trace(src_tokens, src_lengths)(encoder_ens)
+            decoder_ens = \
+                DecoderBatchedStepEnsemble(model_list, beam_size, word_penalty,
+                                           unk_penalty, tile_internal=True)
+            prev_token = torch.LongTensor([0])
+            prev_scores = torch.FloatTensor([0.0])
+            ts = torch.LongTensor([0])
+            self.decoder_ens = torch.jit.trace(prev_token, prev_scores, ts, *example_encoder_outs)(decoder_ens)
+
+        @torch.jit.script_method
+        def forward(self, src_tokens, src_lengths, prev_token, prev_scores, attn_weights, prev_hypos_indices,
+                    all_tokens, all_scores, all_weights, all_prev_indices):
+            states = self.encoder_ens(src_tokens, src_lengths)
+
+            for i in range(20):
+                prev_token, prev_scores, prev_hypos_indices, attn_weights, *states = \
+                    self.decoder_ens(prev_token, prev_scores, i, *states)
+
+                all_tokens = torch.cat(
+                    (all_tokens, prev_token.unsqueeze(dim=0)))
+                all_scores = torch.cat(
+                    (all_scores, prev_scores.unsqueeze(dim=0)))
+                all_weights = torch.cat(
+                    (all_weights, attn_weights.unsqueeze(dim=0)))
+                all_prev_indices = torch.cat(
+                    (all_prev_indices, prev_hypos_indices.unsqueeze(dim=0)))
+
+            return all_tokens, all_scores, all_weights, all_prev_indices
+
+    def _test_full_beam_decoder(self, test_args):
+        samples, src_dict, tgt_dict = test_utils.prepare_inputs(test_args)
+        sample = next(samples)
+        src_tokens = sample['net_input']['src_tokens'][0:1].t()
+        src_lengths = sample['net_input']['src_lengths'][0:1].int()
+
+        num_models = 3
+        model_list = []
+        for _ in range(num_models):
+            model_list.append(models.build_model(
+                test_args, src_dict, tgt_dict))
+
+        bs = TestONNX.BeamSearch(model_list, src_tokens, src_lengths, beam_size=6)
+        prev_token = torch.LongTensor([0])
+        prev_scores = torch.FloatTensor([0.0])
+        attn_weights = torch.zeros(11)
+        prev_hypos_indices = torch.zeros(6, dtype=torch.int64)
+
+        all_tokens = prev_token.repeat(6).unsqueeze(dim=0)
+        all_scores = prev_scores.repeat(6).unsqueeze(dim=0)
+        all_weights = attn_weights.unsqueeze(dim=0).repeat(6, 1)\
+                                  .unsqueeze(dim=0)
+        all_prev_indices = prev_hypos_indices.unsqueeze(dim=0)
+
+        bs(src_tokens, src_lengths, prev_token, prev_scores, attn_weights, prev_hypos_indices,
+           all_tokens, all_scores, all_weights, all_prev_indices)
+
+    def test_full_beam_decoder(self):
+        test_args = test_utils.ModelParamsDict(
+            encoder_bidirectional=True,
+            sequence_lstm=True,
+        )
+        self._test_full_beam_decoder(test_args)
